@@ -2,11 +2,10 @@ import os
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QLineEdit, QFileDialog, QMessageBox, QGroupBox,
-    QDoubleSpinBox, QCheckBox
+    QSpinBox, QCheckBox
 )
-from qgis.PyQt.QtCore import Qt
 from qgis.core import QgsProject, QgsMapLayer
-from .api import export_layer_to_svg
+from .api import export_layer_to_svg_vector
 
 
 class SVGExportDialog(QDialog):
@@ -24,9 +23,17 @@ class SVGExportDialog(QDialog):
         layer_group = QGroupBox("Layer")
         layer_layout = QVBoxLayout(layer_group)
         self.layer_combo = QComboBox()
-        self._populate_layers()
-        layer_layout.addWidget(QLabel("Select layer to export:"))
+        layer_layout.addWidget(QLabel("Select vector layer to export:"))
         layer_layout.addWidget(self.layer_combo)
+
+        id_layout = QHBoxLayout()
+        id_layout.addWidget(QLabel("ID field:"))
+        self.id_field_combo = QComboBox()
+        id_layout.addWidget(self.id_field_combo)
+        layer_layout.addLayout(id_layout)
+
+        self._populate_layers()
+        self.layer_combo.currentIndexChanged.connect(self._on_layer_changed)
         layout.addWidget(layer_group)
 
         # Export options
@@ -35,21 +42,11 @@ class SVGExportDialog(QDialog):
 
         width_layout = QHBoxLayout()
         width_layout.addWidget(QLabel("Width (px):"))
-        self.width_spin = QDoubleSpinBox()
+        self.width_spin = QSpinBox()
         self.width_spin.setRange(100, 10000)
-        self.width_spin.setValue(800)
-        self.width_spin.setDecimals(0)
+        self.width_spin.setValue(1200)
         width_layout.addWidget(self.width_spin)
         options_layout.addLayout(width_layout)
-
-        height_layout = QHBoxLayout()
-        height_layout.addWidget(QLabel("Height (px):"))
-        self.height_spin = QDoubleSpinBox()
-        self.height_spin.setRange(100, 10000)
-        self.height_spin.setValue(600)
-        self.height_spin.setDecimals(0)
-        height_layout.addWidget(self.height_spin)
-        options_layout.addLayout(height_layout)
 
         self.use_canvas_extent = QCheckBox("Use current map canvas extent")
         self.use_canvas_extent.setChecked(True)
@@ -82,10 +79,27 @@ class SVGExportDialog(QDialog):
 
     def _populate_layers(self):
         self.layer_combo.clear()
-        self.layer_combo.addItem("-- All visible layers --", None)
         for layer in QgsProject.instance().mapLayers().values():
-            if layer.type() in (QgsMapLayer.VectorLayer, QgsMapLayer.RasterLayer):
+            if layer.type() == QgsMapLayer.VectorLayer:
                 self.layer_combo.addItem(layer.name(), layer.id())
+        self._refresh_id_fields()
+
+    def _on_layer_changed(self):
+        self._refresh_id_fields()
+
+    def _refresh_id_fields(self):
+        self.id_field_combo.clear()
+        layer = self._current_layer()
+        if layer is None:
+            return
+        for field in layer.fields():
+            self.id_field_combo.addItem(field.name())
+
+    def _current_layer(self):
+        layer_id = self.layer_combo.currentData()
+        if not layer_id:
+            return None
+        return QgsProject.instance().mapLayer(layer_id)
 
     def _browse_output(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -102,29 +116,27 @@ class SVGExportDialog(QDialog):
             QMessageBox.warning(self, "Missing Output", "Please select an output file path.")
             return
 
-        width = int(self.width_spin.value())
-        height = int(self.height_spin.value())
+        layer = self._current_layer()
+        if layer is None:
+            QMessageBox.warning(self, "No Layer", "Please select a vector layer.")
+            return
+
+        id_field = self.id_field_combo.currentText()
+        if not id_field:
+            QMessageBox.warning(self, "No ID Field", "Please select an ID field.")
+            return
 
         canvas = self.iface.mapCanvas()
-        layer_id = self.layer_combo.currentData()
+        extent = canvas.extent() if self.use_canvas_extent.isChecked() else None
+        crs = canvas.mapSettings().destinationCrs()
 
-        if layer_id:
-            layer = QgsProject.instance().mapLayer(layer_id)
-            extent = canvas.extent() if self.use_canvas_extent.isChecked() else layer.extent()
-            crs = canvas.mapSettings().destinationCrs()
-        else:
-            layer = None
-            extent = canvas.extent()
-            crs = canvas.mapSettings().destinationCrs()
-
-        export_layer_to_svg(
+        export_layer_to_svg_vector(
             layer=layer,
             output_path=output,
-            width=width,
-            height=height,
+            id_field=id_field,
+            width=self.width_spin.value(),
             extent=extent,
             crs=crs,
-            background_color=canvas.canvasColor(),
         )
 
         QMessageBox.information(self, "Export Complete", f"SVG exported to:\n{output}")

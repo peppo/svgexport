@@ -1,60 +1,10 @@
 import xml.etree.ElementTree as ET
 
 from qgis.core import (
-    QgsMapLayer, QgsMapSettings, QgsMapRendererParallelJob,
     QgsVectorLayer, QgsCoordinateTransform, QgsProject, QgsWkbTypes,
     QgsRenderContext,
 )
-from qgis.PyQt.QtSvg import QSvgGenerator
-from qgis.PyQt.QtCore import QSize, QRectF
-from qgis.PyQt.QtGui import QPainter, QColor
-
-
-def export_layer_to_svg(
-    layer: QgsMapLayer,
-    output_path: str,
-    width: int = 800,
-    height: int = 600,
-    extent=None,
-    crs=None,
-    background_color: QColor = None,
-):
-    """Export a QGIS map layer to an SVG file.
-
-    Args:
-        layer: The QgsMapLayer to export. Pass None to export all visible layers
-               (requires extent and crs to be provided).
-        output_path: Destination .svg file path.
-        width: Output width in pixels.
-        height: Output height in pixels.
-        extent: QgsRectangle defining the map extent. Defaults to the layer extent.
-        crs: QgsCoordinateReferenceSystem for the output. Defaults to the layer CRS.
-        background_color: Background QColor. Defaults to white.
-    """
-    if layer is None and extent is None:
-        raise ValueError("extent must be provided when layer is None")
-
-    settings = QgsMapSettings()
-    settings.setLayers([layer] if layer is not None else [])
-    settings.setExtent(extent if extent is not None else layer.extent())
-    settings.setOutputSize(QSize(width, height))
-    settings.setDestinationCrs(crs if crs is not None else layer.crs())
-    settings.setBackgroundColor(background_color if background_color is not None else QColor("white"))
-
-    generator = QSvgGenerator()
-    generator.setFileName(output_path)
-    generator.setSize(QSize(width, height))
-    generator.setViewBox(QRectF(0, 0, width, height))
-    generator.setTitle("QGIS SVG Export")
-    generator.setDescription("Exported by SVGExport QGIS plugin")
-
-    job = QgsMapRendererParallelJob(settings)
-    job.start()
-    job.waitForFinished()
-
-    painter = QPainter(generator)
-    painter.drawImage(0, 0, job.renderedImage())
-    painter.end()
+from qgis.PyQt.QtGui import QColor
 
 
 def _color_to_hex(color: QColor) -> str:

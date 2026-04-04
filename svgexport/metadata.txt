@@ -1,8 +1,10 @@
 [general]
 name=SVG Export
 qgisMinimumVersion=3.16
+qgisMaximumVersion=4.99
+supportsQt6=True
 description=Export map layers to SVG format with custom options
-version=0.1.0
+version=0.1.0-SNAPSHOT
 author=Peppo Herney
 email=peppo.herney@gmx.de
 
