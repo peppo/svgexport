@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 from qgis.core import (
     QgsMapLayer, QgsMapSettings, QgsMapRendererParallelJob,
     QgsVectorLayer, QgsCoordinateTransform, QgsProject, QgsWkbTypes,
+    QgsRenderContext,
 )
 from qgis.PyQt.QtSvg import QSvgGenerator
 from qgis.PyQt.QtCore import QSize, QRectF
@@ -54,6 +55,40 @@ def export_layer_to_svg(
     painter = QPainter(generator)
     painter.drawImage(0, 0, job.renderedImage())
     painter.end()
+
+
+def _color_to_hex(color: QColor) -> str:
+    return f"#{color.red():02x}{color.green():02x}{color.blue():02x}"
+
+
+def _feature_style_attrs(renderer, feature, context) -> dict:
+    """Return SVG style attribute dict for a feature via the layer renderer."""
+    symbol = renderer.symbolForFeature(feature, context)
+    if symbol is None:
+        return {}
+
+    fill_color = symbol.color()
+    stroke_color = QColor(35, 35, 35)
+    stroke_width_mm = 0.26
+
+    for i in range(symbol.symbolLayerCount()):
+        sl = symbol.symbolLayer(i)
+        if hasattr(sl, "strokeColor"):
+            stroke_color = sl.strokeColor()
+        if hasattr(sl, "strokeWidth"):
+            stroke_width_mm = sl.strokeWidth()
+        break  # first symbol layer only
+
+    stroke_px = round(stroke_width_mm * 96 / 25.4, 2)  # mm → px at 96 DPI
+
+    parts = [f"fill:{_color_to_hex(fill_color)}"]
+    if fill_color.alpha() < 255:
+        parts.append(f"fill-opacity:{fill_color.alpha()/255:.3f}")
+    parts += [f"stroke:{_color_to_hex(stroke_color)}", f"stroke-width:{stroke_px}"]
+    if stroke_color.alpha() < 255:
+        parts.append(f"stroke-opacity:{stroke_color.alpha()/255:.3f}")
+
+    return {"style": ";".join(parts)}
 
 
 def _ring_to_svg(points, x0, y0, scale):
@@ -124,6 +159,10 @@ def export_layer_to_svg_vector(
         },
     )
 
+    renderer = layer.renderer()
+    render_ctx = QgsRenderContext()
+    renderer.startRender(render_ctx, layer.fields())
+
     for feature in layer.getFeatures():
         geom = feature.geometry()
         if transform:
@@ -136,6 +175,10 @@ def export_layer_to_svg_vector(
         path_el = ET.SubElement(root, "{http://www.w3.org/2000/svg}path")
         path_el.set("d", d)
         path_el.set("id", str(feature[id_field]))
+        for attr, val in _feature_style_attrs(renderer, feature, render_ctx).items():
+            path_el.set(attr, val)
+
+    renderer.stopRender(render_ctx)
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
