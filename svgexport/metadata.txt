@@ -18,6 +18,6 @@ tags=svg,export,vector
 
 homepage=https://github.com/peppo/svgexport
 category=Plugins
-icon=icon.png
+icon=icon.svg
 experimental=True
 deprecated=False

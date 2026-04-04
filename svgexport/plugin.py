@@ -12,7 +12,7 @@ class SVGExportPlugin:
         self.dialog = None
 
     def initGui(self):
-        icon = QIcon(os.path.join(self.plugin_dir, "icon.png"))
+        icon = QIcon(os.path.join(self.plugin_dir, "icon.svg"))
         self.action = QAction(icon, "Export to SVG", self.iface.mainWindow())
         self.action.triggered.connect(self.run)
         self.action.setEnabled(True)

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Document shape with folded corner -->
+  <path d="M3,2 L15,2 L21,8 L21,22 L3,22 Z"
+        fill="#e8f0fb" stroke="#99aabb" stroke-width="0.8" stroke-linejoin="round"/>
+  <!-- Folded corner flap -->
+  <path d="M15,2 L15,8 L21,8"
+        fill="#c5d8f5" stroke="#99aabb" stroke-width="0.8" stroke-linejoin="round"/>
+  <!-- Export arrow pointing right-down out of doc -->
+  <polyline points="10,13 14,13 14,11 17,14 14,17 14,15 10,15 Z"
+            fill="#1a6cd4" stroke="none"/>
+  <!-- SVG label at top of document -->
+  <text x="11" y="9.5" text-anchor="middle"
+        font-family="Arial, sans-serif" font-size="6.5" font-weight="bold"
+        fill="#1a6cd4">SVG</text>
+</svg>
