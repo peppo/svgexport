@@ -1,37 +1,69 @@
 import os
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QPushButton, QLineEdit, QFileDialog, QMessageBox, QGroupBox,
-    QSpinBox
+    QPushButton, QLineEdit, QFileDialog, QGroupBox,
+    QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy
 )
+from qgis.PyQt.QtCore import Qt
+
+try:
+    _Checked = Qt.CheckState.Checked      # PyQt6
+    _Unchecked = Qt.CheckState.Unchecked
+except AttributeError:
+    _Checked = Qt.Checked                 # PyQt5
+    _Unchecked = Qt.Unchecked
+
+try:
+    _ItemIsUserCheckable = Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled  # PyQt6
+    _ItemIsEnabled = Qt.ItemFlag.ItemIsEnabled
+    _UserRole = Qt.ItemDataRole.UserRole
+    _NoSelection = QTableWidget.SelectionMode.NoSelection
+    _NoEditTriggers = QTableWidget.EditTrigger.NoEditTriggers
+    _ResizeToContents = QHeaderView.ResizeMode.ResizeToContents
+    _Stretch = QHeaderView.ResizeMode.Stretch
+    _Expanding = QSizePolicy.Policy.Expanding
+except AttributeError:
+    _ItemIsUserCheckable = Qt.ItemIsUserCheckable | Qt.ItemIsEnabled                    # PyQt5
+    _ItemIsEnabled = Qt.ItemIsEnabled
+    _UserRole = Qt.UserRole
+    _NoSelection = QTableWidget.NoSelection
+    _NoEditTriggers = QTableWidget.NoEditTriggers
+    _ResizeToContents = QHeaderView.ResizeToContents
+    _Stretch = QHeaderView.Stretch
+    _Expanding = QSizePolicy.Expanding
+
 from qgis.core import QgsProject, QgsMapLayer, QgsTask, QgsApplication, QgsMessageLog, Qgis, QgsSettings
-from .api import export_layer_to_svg_vector
+from .api import export_layers_to_svg_vector
 
 # Keep strong Python references to running tasks so the GC does not collect
 # them before finished() is called (the C++ task manager only holds a C++ ref).
 _active_tasks = []
 
+_COL_CHECK = 0
+_COL_NAME  = 1
+_COL_FIELD = 2
+
 
 class SVGExportTask(QgsTask):
-    def __init__(self, layer, output_path, id_field, width, iface):
-        super().__init__(f"SVG Export: {layer.name()}", QgsTask.CanCancel)
-        self.layer = layer
+    def __init__(self, layers_fields, output_path, width, iface):
+        names = ", ".join(l.name() for l, _ in layers_fields)
+        super().__init__(f"SVG Export: {names}", QgsTask.CanCancel)
+        self.layers_fields = layers_fields
         self.output_path = output_path
-        self.id_field = id_field
         self.width = width
         self.iface = iface
         self.error = None
 
     def run(self):
+        names = ", ".join(l.name() for l, _ in self.layers_fields)
         QgsMessageLog.logMessage(
-            f"Starting export of '{self.layer.name()}' to {self.output_path}",
+            f"Starting export of '{names}' to {self.output_path}",
             "SVG Export", Qgis.Info,
         )
         try:
-            export_layer_to_svg_vector(
-                layer=self.layer,
+            export_layers_to_svg_vector(
+                layers_fields=self.layers_fields,
                 output_path=self.output_path,
-                id_field=self.id_field,
                 width=self.width,
                 progress_callback=self.setProgress,
                 should_stop=self.isCanceled,
@@ -45,9 +77,10 @@ class SVGExportTask(QgsTask):
         return not self.isCanceled()
 
     def finished(self, result):
+        names = ", ".join(l.name() for l, _ in self.layers_fields)
         if self.isCanceled():
             QgsMessageLog.logMessage(
-                f"Export of '{self.layer.name()}' was cancelled.", "SVG Export", Qgis.Warning,
+                f"Export of '{names}' was cancelled.", "SVG Export", Qgis.Warning,
             )
             return
         if result:
@@ -68,58 +101,69 @@ class SVGExportDialog(QDialog):
         super().__init__(parent or iface.mainWindow())
         self.iface = iface
         self.setWindowTitle("Export to SVG")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(520)
         self._build_ui()
 
-    def _settings(self):
-        return QgsSettings()
+    # ------------------------------------------------------------------
+    # Settings
+    # ------------------------------------------------------------------
 
     def _load_settings(self):
-        s = self._settings()
+        s = QgsSettings()
         self.width_spin.setValue(int(s.value("svgexport/width", 1200)))
-        last_field = s.value("svgexport/id_field", "")
-        if last_field:
-            idx = self.id_field_combo.findText(last_field)
-            if idx >= 0:
-                self.id_field_combo.setCurrentIndex(idx)
+        # Per-layer field preferences are restored inside _populate_table.
 
     def _save_settings(self):
-        s = self._settings()
+        s = QgsSettings()
         s.setValue("svgexport/width", self.width_spin.value())
-        s.setValue("svgexport/id_field", self.id_field_combo.currentText())
+        checked_names = []
+        for row in range(self.layer_table.rowCount()):
+            layer = self._layer_at(row)
+            combo = self.layer_table.cellWidget(row, _COL_FIELD)
+            if not layer:
+                continue
+            if combo and combo.currentText():
+                s.setValue(f"svgexport/id_field/{layer.name()}", combo.currentText())
+            if self._is_checked(row):
+                checked_names.append(layer.name())
+        s.setValue("svgexport/checked_layers", checked_names)
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
-        # Layer selection
-        layer_group = QGroupBox("Layer")
+        # Layer table
+        layer_group = QGroupBox("Layers")
         layer_layout = QVBoxLayout(layer_group)
-        self.layer_combo = QComboBox()
-        layer_layout.addWidget(QLabel("Select vector layer to export:"))
-        layer_layout.addWidget(self.layer_combo)
 
-        id_layout = QHBoxLayout()
-        id_layout.addWidget(QLabel("ID field:"))
-        self.id_field_combo = QComboBox()
-        id_layout.addWidget(self.id_field_combo)
-        layer_layout.addLayout(id_layout)
+        self.layer_table = QTableWidget(0, 3)
+        self.layer_table.setHorizontalHeaderLabels(["", "Layer", "ID Field"])
+        self.layer_table.verticalHeader().setVisible(False)
+        self.layer_table.setSelectionMode(_NoSelection)
+        self.layer_table.setEditTriggers(_NoEditTriggers)
+        self.layer_table.setSizePolicy(_Expanding, _Expanding)
 
-        self._populate_layers()
-        self.layer_combo.currentIndexChanged.connect(self._on_layer_changed)
+        hdr = self.layer_table.horizontalHeader()
+        hdr.setSectionResizeMode(_COL_CHECK, _ResizeToContents)
+        hdr.setSectionResizeMode(_COL_NAME,  _Stretch)
+        hdr.setSectionResizeMode(_COL_FIELD, _ResizeToContents)
+
+        self.layer_table.itemChanged.connect(self._on_check_changed)
+        layer_layout.addWidget(self.layer_table)
         layout.addWidget(layer_group)
 
         # Export options
         options_group = QGroupBox("Options")
-        options_layout = QVBoxLayout(options_group)
-
-        width_layout = QHBoxLayout()
-        width_layout.addWidget(QLabel("Width (px):"))
+        options_layout = QHBoxLayout(options_group)
+        options_layout.addWidget(QLabel("Width (px):"))
         self.width_spin = QSpinBox()
         self.width_spin.setRange(100, 10000)
         self.width_spin.setValue(1200)
-        width_layout.addWidget(self.width_spin)
-        options_layout.addLayout(width_layout)
-
+        options_layout.addWidget(self.width_spin)
+        options_layout.addStretch()
         layout.addWidget(options_group)
 
         # Output path
@@ -147,65 +191,144 @@ class SVGExportDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self.output_path.textChanged.connect(self._update_export_btn)
-        self.id_field_combo.currentIndexChanged.connect(self._update_export_btn)
 
+        self._populate_table()
         self._load_settings()
 
-    def _populate_layers(self):
-        self.layer_combo.clear()
-        for layer in QgsProject.instance().mapLayers().values():
-            if layer.type() == QgsMapLayer.VectorLayer:
-                self.layer_combo.addItem(layer.name(), layer.id())
-        self._refresh_id_fields()
+    def _populate_table(self):
+        s = QgsSettings()
+        checked_names = set(s.value("svgexport/checked_layers", []) or [])
+        self.layer_table.setRowCount(0)
+        self.layer_table.blockSignals(True)
 
-    def _on_layer_changed(self):
-        self._refresh_id_fields()
+        ordered_ids = [
+            tl.layerId()
+            for tl in QgsProject.instance().layerTreeRoot().findLayers()
+        ]
+        layers_map = QgsProject.instance().mapLayers()
 
-    def _refresh_id_fields(self):
-        self.id_field_combo.clear()
-        layer = self._current_layer()
-        if layer is None:
-            return
-        feature_count = layer.featureCount()
+        for layer_id in ordered_ids:
+            layer = layers_map.get(layer_id)
+            if not layer or layer.type() != QgsMapLayer.VectorLayer:
+                continue
+
+            row = self.layer_table.rowCount()
+            self.layer_table.insertRow(row)
+
+            # Checkbox column
+            check_item = QTableWidgetItem()
+            check_item.setFlags(_ItemIsUserCheckable)
+            check_item.setCheckState(_Checked if layer.name() in checked_names else _Unchecked)
+            check_item.setData(_UserRole, layer_id)
+            self.layer_table.setItem(row, _COL_CHECK, check_item)
+
+            # Layer name column
+            name_item = QTableWidgetItem(layer.name())
+            name_item.setFlags(_ItemIsEnabled)
+            self.layer_table.setItem(row, _COL_NAME, name_item)
+
+            # ID field dropdown
+            combo = QComboBox()
+            combo.setEnabled(False)
+            unique_fields = self._unique_fields(layer)
+            for fname in unique_fields:
+                combo.addItem(fname)
+            # Restore last used field for this layer
+            last_field = s.value(f"svgexport/id_field/{layer.name()}", "")
+            if last_field:
+                idx = combo.findText(last_field)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+            combo.currentIndexChanged.connect(self._update_export_btn)
+            self.layer_table.setCellWidget(row, _COL_FIELD, combo)
+
+        self.layer_table.blockSignals(False)
+        self._update_export_btn()
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _unique_fields(self, layer):
+        count = layer.featureCount()
+        result = []
         for field in layer.fields():
             name = field.name()
             values = [f[name] for f in layer.getFeatures()]
-            if len(set(values)) == feature_count:
-                self.id_field_combo.addItem(name)
+            if len(set(values)) == count:
+                result.append(name)
+        return result
 
-    def _current_layer(self):
-        layer_id = self.layer_combo.currentData()
-        if not layer_id:
+    def _layer_at(self, row):
+        item = self.layer_table.item(row, _COL_CHECK)
+        if not item:
             return None
+        layer_id = item.data(_UserRole)
         return QgsProject.instance().mapLayer(layer_id)
 
+    def _is_checked(self, row):
+        item = self.layer_table.item(row, _COL_CHECK)
+        return item and item.checkState() == _Checked
+
+    def _checked_layers_fields(self):
+        """Return (layer, id_field) pairs in bottom-to-top draw order."""
+        result = []
+        for row in range(self.layer_table.rowCount()):
+            if not self._is_checked(row):
+                continue
+            layer = self._layer_at(row)
+            combo = self.layer_table.cellWidget(row, _COL_FIELD)
+            if layer and combo and combo.currentText():
+                result.append((layer, combo.currentText()))
+        # Table is in top-to-bottom legend order; reverse for draw order.
+        return list(reversed(result))
+
+    def _on_check_changed(self, item):
+        if item.column() != _COL_CHECK:
+            return
+        row = item.row()
+        checked = item.checkState() == _Checked
+        combo = self.layer_table.cellWidget(row, _COL_FIELD)
+        if combo:
+            combo.setEnabled(checked)
+        self._update_export_btn()
+
     def _update_export_btn(self):
+        pairs = self._checked_layers_fields()
         self.export_btn.setEnabled(
-            bool(self.output_path.text().strip()) and self.id_field_combo.count() > 0
+            bool(self.output_path.text().strip()) and len(pairs) > 0
         )
 
+    # ------------------------------------------------------------------
+    # Browse / Export
+    # ------------------------------------------------------------------
+
     def _browse_output(self):
-        layer = self._current_layer()
-        settings = QgsSettings()
-        last_dir = settings.value("svgexport/last_dir", "")
-        layer_name = layer.name() if layer else ""
-        suggestion = os.path.join(last_dir, layer_name + ".svg") if layer_name else last_dir
+        pairs = self._checked_layers_fields()
+        s = QgsSettings()
+        last_dir = s.value("svgexport/last_dir", "")
+        if len(pairs) == 1:
+            suggestion_name = pairs[0][0].name() + ".svg"
+        elif len(pairs) > 1:
+            suggestion_name = "export.svg"
+        else:
+            suggestion_name = ""
+        suggestion = os.path.join(last_dir, suggestion_name) if suggestion_name else last_dir
         path, _ = QFileDialog.getSaveFileName(
             self, "Save SVG File", suggestion, "SVG Files (*.svg)"
         )
         if path:
             if not path.lower().endswith(".svg"):
                 path += ".svg"
-            settings.setValue("svgexport/last_dir", os.path.dirname(path))
+            s.setValue("svgexport/last_dir", os.path.dirname(path))
             self.output_path.setText(path)
 
     def _export(self):
         output = self.output_path.text().strip()
-        layer = self._current_layer()
-        id_field = self.id_field_combo.currentText()
+        layers_fields = self._checked_layers_fields()
 
         self._save_settings()
-        task = SVGExportTask(layer, output, id_field, self.width_spin.value(), self.iface)
+        task = SVGExportTask(layers_fields, output, self.width_spin.value(), self.iface)
         _active_tasks.append(task)
 
         def _cleanup():
