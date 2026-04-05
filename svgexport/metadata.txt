@@ -7,7 +7,8 @@ version=0.5.0
 author=Peppo Herney
 email=peppo.herney@gmx.de
 
-about=A QGIS plugin to export map layers and compositions to SVG format. Supports layer selection, scale control, and output path configuration.
+about=A QGIS plugin to export map layers to SVG format. 
+You can set an id-field which can be used in vector graphics editors.
 
 tracker=https://github.com/peppo/svgexport/issues
 repository=https://github.com/peppo/svgexport
