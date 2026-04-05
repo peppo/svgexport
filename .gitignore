@@ -120,3 +120,4 @@ Thumbs.db
 
 html/
 test_output/
+.claude/settings.local.json
