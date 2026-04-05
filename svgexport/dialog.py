@@ -1,6 +1,6 @@
 import os
 from qgis.PyQt.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QComboBox,
     QPushButton, QLineEdit, QFileDialog, QGroupBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox
 )
@@ -46,7 +46,8 @@ _COL_FIELD = 2
 
 
 class SVGExportTask(QgsTask):
-    def __init__(self, layers_fields, output_path, width, iface, create_html=False):
+    def __init__(self, layers_fields, output_path, width, iface,
+                 create_html=False, search_layer=None, search_field=None):
         names = ", ".join(l.name() for l, _ in layers_fields)
         super().__init__(f"SVG Export: {names}", QgsTask.CanCancel)
         self.layers_fields = layers_fields
@@ -54,6 +55,8 @@ class SVGExportTask(QgsTask):
         self.width = width
         self.iface = iface
         self.create_html = create_html
+        self.search_layer = search_layer
+        self.search_field = search_field
         self.html_path = None
         self.error = None
 
@@ -73,10 +76,12 @@ class SVGExportTask(QgsTask):
             )
             if self.create_html and not self.isCanceled():
                 from .html import generate_html_companion
-                top_layer, top_id_field = self.layers_fields[-1]
-                id_prefix = f"{top_layer.name()}_" if len(self.layers_fields) > 1 else ""
+                # Use explicitly chosen search layer/field, fall back to top export layer
+                search_layer = self.search_layer or self.layers_fields[-1][0]
+                search_field = self.search_field or self.layers_fields[-1][1]
+                id_prefix = f"{search_layer.name()}_" if len(self.layers_fields) > 1 else ""
                 self.html_path = os.path.splitext(self.output_path)[0] + ".html"
-                generate_html_companion(self.output_path, self.html_path, top_layer, top_id_field, id_prefix)
+                generate_html_companion(self.output_path, self.html_path, search_layer, search_field, id_prefix)
         except Exception as e:
             self.error = str(e)
             QgsMessageLog.logMessage(
@@ -123,12 +128,17 @@ class SVGExportDialog(QDialog):
         s = QgsSettings()
         self.width_spin.setValue(int(s.value("svgexport/width", 1200)))
         self.html_check.setChecked(s.value("svgexport/create_html", False, type=bool))
+        self._on_html_check_changed()
         # Per-layer field preferences are restored inside _populate_table.
+        # search_layer/field combos are pre-populated in _populate_search_layer_combo.
 
     def _save_settings(self):
         s = QgsSettings()
         s.setValue("svgexport/width", self.width_spin.value())
         s.setValue("svgexport/create_html", self.html_check.isChecked())
+        s.setValue("svgexport/search_layer", self.search_layer_combo.currentText())
+        s.setValue(f"svgexport/search_field/{self.search_layer_combo.currentText()}",
+                   self.search_field_combo.currentText())
         checked_names = []
         for row in range(self.layer_table.rowCount()):
             layer = self._layer_at(row)
@@ -170,15 +180,33 @@ class SVGExportDialog(QDialog):
 
         # Export options
         options_group = QGroupBox("Options")
-        options_layout = QHBoxLayout(options_group)
-        options_layout.addWidget(QLabel("Width (px):"))
+        options_layout = QFormLayout(options_group)
+
+        width_row = QHBoxLayout()
         self.width_spin = QSpinBox()
         self.width_spin.setRange(100, 10000)
         self.width_spin.setValue(1200)
-        options_layout.addWidget(self.width_spin)
-        options_layout.addStretch()
+        width_row.addWidget(self.width_spin)
+        width_row.addStretch()
+        options_layout.addRow("Width (px):", width_row)
+
         self.html_check = QCheckBox("Create inspirational HTML")
-        options_layout.addWidget(self.html_check)
+        options_layout.addRow("", self.html_check)
+
+        search_layer_row = QHBoxLayout()
+        self.search_layer_combo = QComboBox()
+        self.search_layer_combo.setEnabled(False)
+        search_layer_row.addWidget(self.search_layer_combo)
+        search_layer_row.addStretch()
+        options_layout.addRow("Search layer:", search_layer_row)
+
+        search_field_row = QHBoxLayout()
+        self.search_field_combo = QComboBox()
+        self.search_field_combo.setEnabled(False)
+        search_field_row.addWidget(self.search_field_combo)
+        search_field_row.addStretch()
+        options_layout.addRow("Search field:", search_field_row)
+
         layout.addWidget(options_group)
 
         # Output path
@@ -206,8 +234,11 @@ class SVGExportDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self.output_path.textChanged.connect(self._update_export_btn)
+        self.html_check.stateChanged.connect(self._on_html_check_changed)
+        self.search_layer_combo.currentIndexChanged.connect(self._on_search_layer_changed)
 
         self._populate_table()
+        self._populate_search_layer_combo()
         self._load_settings()
 
     def _populate_table(self):
@@ -260,6 +291,45 @@ class SVGExportDialog(QDialog):
         self.layer_table.blockSignals(False)
         self._update_export_btn()
 
+    def _populate_search_layer_combo(self):
+        s = QgsSettings()
+        saved_layer = s.value("svgexport/search_layer", "")
+        self.search_layer_combo.blockSignals(True)
+        self.search_layer_combo.clear()
+        for layer, _ in self._checked_layers_fields():
+            self.search_layer_combo.addItem(layer.name(), layer.id())
+        # Restore saved selection
+        idx = self.search_layer_combo.findText(saved_layer)
+        if idx >= 0:
+            self.search_layer_combo.setCurrentIndex(idx)
+        self.search_layer_combo.blockSignals(False)
+        self._populate_search_field_combo()
+
+    def _populate_search_field_combo(self):
+        s = QgsSettings()
+        layer_name = self.search_layer_combo.currentText()
+        saved_field = s.value(f"svgexport/search_field/{layer_name}", "")
+        self.search_field_combo.blockSignals(True)
+        self.search_field_combo.clear()
+        layer_id = self.search_layer_combo.currentData()
+        if layer_id:
+            layer = QgsProject.instance().mapLayer(layer_id)
+            if layer:
+                for field in layer.fields():
+                    self.search_field_combo.addItem(field.name())
+        idx = self.search_field_combo.findText(saved_field)
+        if idx >= 0:
+            self.search_field_combo.setCurrentIndex(idx)
+        self.search_field_combo.blockSignals(False)
+
+    def _on_html_check_changed(self):
+        enabled = self.html_check.isChecked()
+        self.search_layer_combo.setEnabled(enabled)
+        self.search_field_combo.setEnabled(enabled)
+
+    def _on_search_layer_changed(self):
+        self._populate_search_field_combo()
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -306,6 +376,7 @@ class SVGExportDialog(QDialog):
         combo = self.layer_table.cellWidget(row, _COL_FIELD)
         if combo:
             combo.setEnabled(checked)
+        self._populate_search_layer_combo()
         self._update_export_btn()
 
     def _update_export_btn(self):
@@ -342,9 +413,17 @@ class SVGExportDialog(QDialog):
         output = self.output_path.text().strip()
         layers_fields = self._checked_layers_fields()
 
+        search_layer = None
+        search_field = None
+        if self.html_check.isChecked():
+            layer_id = self.search_layer_combo.currentData()
+            search_layer = QgsProject.instance().mapLayer(layer_id) if layer_id else None
+            search_field = self.search_field_combo.currentText() or None
+
         self._save_settings()
         task = SVGExportTask(layers_fields, output, self.width_spin.value(), self.iface,
-                             create_html=self.html_check.isChecked())
+                             create_html=self.html_check.isChecked(),
+                             search_layer=search_layer, search_field=search_field)
         _active_tasks.append(task)
 
         def _cleanup():
