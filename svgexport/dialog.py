@@ -2,7 +2,7 @@ import os
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QLineEdit, QFileDialog, QGroupBox,
-    QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy
+    QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox
 )
 from qgis.PyQt.QtCore import Qt
 
@@ -45,13 +45,14 @@ _COL_FIELD = 2
 
 
 class SVGExportTask(QgsTask):
-    def __init__(self, layers_fields, output_path, width, iface):
+    def __init__(self, layers_fields, output_path, width, iface, create_html=False):
         names = ", ".join(l.name() for l, _ in layers_fields)
         super().__init__(f"SVG Export: {names}", QgsTask.CanCancel)
         self.layers_fields = layers_fields
         self.output_path = output_path
         self.width = width
         self.iface = iface
+        self.create_html = create_html
         self.error = None
 
     def run(self):
@@ -68,6 +69,12 @@ class SVGExportTask(QgsTask):
                 progress_callback=self.setProgress,
                 should_stop=self.isCanceled,
             )
+            if self.create_html and not self.isCanceled():
+                from .html import generate_html_companion
+                top_layer, top_id_field = self.layers_fields[-1]
+                id_prefix = f"{top_layer.name()}_" if len(self.layers_fields) > 1 else ""
+                html_path = os.path.splitext(self.output_path)[0] + ".html"
+                generate_html_companion(self.output_path, html_path, top_layer, top_id_field, id_prefix)
         except Exception as e:
             self.error = str(e)
             QgsMessageLog.logMessage(
@@ -111,11 +118,13 @@ class SVGExportDialog(QDialog):
     def _load_settings(self):
         s = QgsSettings()
         self.width_spin.setValue(int(s.value("svgexport/width", 1200)))
+        self.html_check.setChecked(s.value("svgexport/create_html", False, type=bool))
         # Per-layer field preferences are restored inside _populate_table.
 
     def _save_settings(self):
         s = QgsSettings()
         s.setValue("svgexport/width", self.width_spin.value())
+        s.setValue("svgexport/create_html", self.html_check.isChecked())
         checked_names = []
         for row in range(self.layer_table.rowCount()):
             layer = self._layer_at(row)
@@ -164,6 +173,8 @@ class SVGExportDialog(QDialog):
         self.width_spin.setValue(1200)
         options_layout.addWidget(self.width_spin)
         options_layout.addStretch()
+        self.html_check = QCheckBox("Create inspirational HTML")
+        options_layout.addWidget(self.html_check)
         layout.addWidget(options_group)
 
         # Output path
@@ -328,7 +339,8 @@ class SVGExportDialog(QDialog):
         layers_fields = self._checked_layers_fields()
 
         self._save_settings()
-        task = SVGExportTask(layers_fields, output, self.width_spin.value(), self.iface)
+        task = SVGExportTask(layers_fields, output, self.width_spin.value(), self.iface,
+                             create_html=self.html_check.isChecked())
         _active_tasks.append(task)
 
         def _cleanup():
