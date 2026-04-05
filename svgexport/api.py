@@ -50,27 +50,59 @@ def _line_style(symbol) -> str:
     return ";".join(parts)
 
 
-def _point_style(symbol) -> str:
-    fill_color = symbol.color()
-    stroke_color = QColor(35, 35, 35)
-    stroke_width_mm = 0.2
-    sl = symbol.symbolLayer(0)
+# Marker shapes that have no fill — only stroke.
+_STROKE_ONLY_SHAPES = {"cross", "cross2", "x", "line", "arrowhead"}
+
+
+def _sl_style(sl, no_fill=False) -> str:
+    """Build a CSS style string for one SimpleMarker symbol layer."""
+    parts = []
+    color = sl.color() if hasattr(sl, "color") else QColor(0, 0, 0, 0)
+    if no_fill or color.alpha() == 0:
+        parts.append("fill:none")
+    else:
+        parts += _color_parts(color, "fill")
     if hasattr(sl, "strokeColor"):
-        stroke_color = sl.strokeColor()
+        parts += _color_parts(sl.strokeColor(), "stroke")
     if hasattr(sl, "strokeWidth"):
-        stroke_width_mm = sl.strokeWidth()
-    stroke_px = round(stroke_width_mm * _MM_TO_PX, 2)
-    parts = _color_parts(fill_color, "fill")
-    parts += _color_parts(stroke_color, "stroke")
-    parts.append(f"stroke-width:{stroke_px}")
+        parts.append(f"stroke-width:{round(sl.strokeWidth() * _MM_TO_PX, 2)}")
     return ";".join(parts)
 
 
-def _point_radius_px(symbol) -> float:
-    sl = symbol.symbolLayer(0)
-    if hasattr(sl, "size"):
-        return round(sl.size() / 2 * _MM_TO_PX, 2)
-    return 4.0
+def _add_marker_shape(parent, shape_name, half_px, style):
+    """Append one SVG shape element for a QGIS marker, centered at origin."""
+    s = round(half_px, 2)
+    t = round(s / 3, 2)  # arm thickness for cross shapes
+
+    if shape_name in ("square", "rectangle"):
+        el = ET.SubElement(parent, f"{{{_NS}}}rect")
+        el.set("x", str(round(-s, 2))); el.set("y", str(round(-s, 2)))
+        el.set("width", str(round(2 * s, 2))); el.set("height", str(round(2 * s, 2)))
+    elif shape_name == "diamond":
+        el = ET.SubElement(parent, f"{{{_NS}}}polygon")
+        el.set("points", f"0,{-s} {s},0 0,{s} {-s},0")
+    elif shape_name == "triangle":
+        el = ET.SubElement(parent, f"{{{_NS}}}polygon")
+        el.set("points", f"0,{-s} {s},{s} {-s},{s}")
+    elif shape_name == "cross_fill":
+        el = ET.SubElement(parent, f"{{{_NS}}}path")
+        el.set("d", (
+            f"M {-t},{-s} L {t},{-s} L {t},{-t} L {s},{-t} "
+            f"L {s},{t} L {t},{t} L {t},{s} L {-t},{s} "
+            f"L {-t},{t} L {-s},{t} L {-s},{-t} L {-t},{-t} Z"
+        ))
+    elif shape_name in ("cross", "plus"):
+        el = ET.SubElement(parent, f"{{{_NS}}}path")
+        el.set("d", f"M {-s},0 L {s},0 M 0,{-s} L 0,{s}")
+    elif shape_name in ("cross2", "x"):
+        el = ET.SubElement(parent, f"{{{_NS}}}path")
+        el.set("d", f"M {-s},{-s} L {s},{s} M {s},{-s} L {-s},{s}")
+    else:  # circle (default / fallback)
+        el = ET.SubElement(parent, f"{{{_NS}}}circle")
+        el.set("r", str(s))
+
+    if style:
+        el.set("style", style)
 
 
 def _ring_to_svg(points, x0, y0, scale, close=True) -> str:
@@ -105,33 +137,44 @@ def _geometry_to_svg_d(geom, x0, y0, scale) -> str:
     return " ".join(parts)
 
 
-def _add_point_elements(parent, geom, feature_id, symbol, x0, y0, scale):
-    """Add <circle> element(s) for a point or multipoint feature."""
-    wkb_type = QgsWkbTypes.flatType(geom.wkbType())
-    radius = _point_radius_px(symbol) if symbol else 4.0
-    style = _point_style(symbol) if symbol else ""
+def _render_marker_at(parent, symbol, cx, cy):
+    """Append a <g transform="translate(cx,cy)"> with one element per symbol layer."""
+    g = ET.SubElement(parent, f"{{{_NS}}}g")
+    g.set("transform", f"translate({cx},{cy})")
+    if symbol is None:
+        el = ET.SubElement(g, f"{{{_NS}}}circle")
+        el.set("r", "4")
+        return g
+    for i in range(symbol.symbolLayerCount()):
+        sl = symbol.symbolLayer(i)
+        if sl.layerType() != "SimpleMarker":
+            continue
+        shape = sl.properties().get("name", "circle")
+        half_px = round(sl.size() / 2 * _MM_TO_PX, 2)
+        no_fill = shape in _STROKE_ONLY_SHAPES
+        style = _sl_style(sl, no_fill=no_fill)
+        _add_marker_shape(g, shape, half_px, style)
+    return g
 
+
+def _add_point_elements(parent, geom, feature_id, symbol, x0, y0, scale):
+    """Add SVG element(s) for a point or multipoint feature."""
+    wkb_type = QgsWkbTypes.flatType(geom.wkbType())
     points = [geom.asPoint()] if wkb_type == QgsWkbTypes.Point else geom.asMultiPoint()
 
     if len(points) == 1:
         pt = points[0]
-        el = ET.SubElement(parent, f"{{{_NS}}}circle")
-        el.set("id", str(feature_id))
-        el.set("cx", str(round((pt.x() - x0) * scale, 2)))
-        el.set("cy", str(round((y0 - pt.y()) * scale, 2)))
-        el.set("r", str(radius))
-        if style:
-            el.set("style", style)
-    else:
-        g = ET.SubElement(parent, f"{{{_NS}}}g")
+        cx = round((pt.x() - x0) * scale, 2)
+        cy = round((y0 - pt.y()) * scale, 2)
+        g = _render_marker_at(parent, symbol, cx, cy)
         g.set("id", str(feature_id))
+    else:
+        outer = ET.SubElement(parent, f"{{{_NS}}}g")
+        outer.set("id", str(feature_id))
         for pt in points:
-            el = ET.SubElement(g, f"{{{_NS}}}circle")
-            el.set("cx", str(round((pt.x() - x0) * scale, 2)))
-            el.set("cy", str(round((y0 - pt.y()) * scale, 2)))
-            el.set("r", str(radius))
-            if style:
-                el.set("style", style)
+            cx = round((pt.x() - x0) * scale, 2)
+            cy = round((y0 - pt.y()) * scale, 2)
+            _render_marker_at(outer, symbol, cx, cy)
 
 
 def _render_layer(root, layer, id_field, x0, y0, scale, id_prefix, progress_offset,

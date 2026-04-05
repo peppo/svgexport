@@ -229,7 +229,7 @@ class SVGExportDialog(QDialog):
 
             # ID field dropdown
             combo = QComboBox()
-            combo.setEnabled(False)
+            combo.setEnabled(layer.name() in checked_names)
             unique_fields = self._unique_fields(layer)
             for fname in unique_fields:
                 combo.addItem(fname)
