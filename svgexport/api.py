@@ -76,6 +76,8 @@ def export_layer_to_svg_vector(
     width: int = 800,
     extent=None,
     crs=None,
+    progress_callback=None,
+    should_stop=None,
 ):
     """Export a vector layer to SVG with one <path> per feature.
 
@@ -86,6 +88,8 @@ def export_layer_to_svg_vector(
         width: Output width in pixels. Height is derived from the extent aspect ratio.
         extent: QgsRectangle defining the map extent. Defaults to layer.extent().
         crs: Target QgsCoordinateReferenceSystem. Defaults to layer.crs().
+        progress_callback: Optional callable(percent: float) called during export.
+        should_stop: Optional callable() -> bool; export aborts when it returns True.
     """
     if extent is None:
         extent = layer.extent()
@@ -94,6 +98,7 @@ def export_layer_to_svg_vector(
     scale = width / extent.width()
     x0 = extent.xMinimum()
     y0 = extent.yMaximum()
+    total = layer.featureCount() or 1
 
     transform = None
     target_crs = crs or layer.crs()
@@ -113,7 +118,11 @@ def export_layer_to_svg_vector(
     render_ctx = QgsRenderContext()
     renderer.startRender(render_ctx, layer.fields())
 
-    for feature in layer.getFeatures():
+    for i, feature in enumerate(layer.getFeatures()):
+        if should_stop and should_stop():
+            renderer.stopRender(render_ctx)
+            return
+
         geom = feature.geometry()
         if transform:
             geom.transform(transform)
@@ -127,6 +136,9 @@ def export_layer_to_svg_vector(
         path_el.set("id", str(feature[id_field]))
         for attr, val in _feature_style_attrs(renderer, feature, render_ctx).items():
             path_el.set(attr, val)
+
+        if progress_callback:
+            progress_callback((i + 1) / total * 100)
 
     renderer.stopRender(render_ctx)
 
