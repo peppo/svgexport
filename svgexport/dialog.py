@@ -4,7 +4,8 @@ from qgis.PyQt.QtWidgets import (
     QPushButton, QLineEdit, QFileDialog, QGroupBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox
 )
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QUrl
+from qgis.PyQt.QtGui import QDesktopServices
 
 try:
     _Checked = Qt.CheckState.Checked      # PyQt6
@@ -53,6 +54,7 @@ class SVGExportTask(QgsTask):
         self.width = width
         self.iface = iface
         self.create_html = create_html
+        self.html_path = None
         self.error = None
 
     def run(self):
@@ -73,8 +75,8 @@ class SVGExportTask(QgsTask):
                 from .html import generate_html_companion
                 top_layer, top_id_field = self.layers_fields[-1]
                 id_prefix = f"{top_layer.name()}_" if len(self.layers_fields) > 1 else ""
-                html_path = os.path.splitext(self.output_path)[0] + ".html"
-                generate_html_companion(self.output_path, html_path, top_layer, top_id_field, id_prefix)
+                self.html_path = os.path.splitext(self.output_path)[0] + ".html"
+                generate_html_companion(self.output_path, self.html_path, top_layer, top_id_field, id_prefix)
         except Exception as e:
             self.error = str(e)
             QgsMessageLog.logMessage(
@@ -97,6 +99,8 @@ class SVGExportTask(QgsTask):
             self.iface.messageBar().pushSuccess(
                 "SVG Export", f"Exported to: {self.output_path}"
             )
+            if self.html_path:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(self.html_path))
         else:
             self.iface.messageBar().pushCritical(
                 "SVG Export", self.error or "Export failed."
