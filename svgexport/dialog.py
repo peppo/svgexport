@@ -2,7 +2,8 @@ import os
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QComboBox,
     QPushButton, QLineEdit, QFileDialog, QGroupBox,
-    QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox
+    QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox,
+    QMessageBox
 )
 from qgis.PyQt.QtCore import Qt, QUrl
 from qgis.PyQt.QtGui import QDesktopServices
@@ -33,12 +34,47 @@ except AttributeError:
     _Stretch = QHeaderView.Stretch
     _Expanding = QSizePolicy.Expanding
 
-from qgis.core import QgsProject, QgsMapLayer, QgsTask, QgsApplication, QgsMessageLog, Qgis, QgsSettings
+from qgis.core import (
+    QgsProject, QgsMapLayer, QgsTask, QgsApplication, QgsMessageLog, Qgis,
+    QgsSettings, QgsWkbTypes
+)
 from .api import export_layers_to_svg_vector
+
+try:
+    _MsgYes = QMessageBox.StandardButton.Yes   # PyQt6
+    _MsgNo  = QMessageBox.StandardButton.No
+except AttributeError:
+    _MsgYes = QMessageBox.Yes                  # PyQt5
+    _MsgNo  = QMessageBox.No
 
 # Keep strong Python references to running tasks so the GC does not collect
 # them before finished() is called (the C++ task manager only holds a C++ ref).
 _active_tasks = []
+
+
+def _estimate_layer_points(layer, sample_size=20):
+    """Cheaply estimate total vertex count for a polygon layer.
+
+    Samples up to *sample_size* features, averages their vertex counts,
+    then multiplies by the layer's feature count.  Returns 0 for non-polygon
+    layers or empty layers.
+    """
+    if QgsWkbTypes.geometryType(layer.wkbType()) != QgsWkbTypes.PolygonGeometry:
+        return 0
+    total = 0
+    sampled = 0
+    for feat in layer.getFeatures():
+        g = feat.geometry()
+        if g and not g.isNull():
+            ab = g.constGet()
+            if ab:
+                total += ab.nCoordinates()
+                sampled += 1
+        if sampled >= sample_size:
+            break
+    if sampled == 0:
+        return 0
+    return int(total / sampled * layer.featureCount())
 
 _COL_CHECK = 0
 _COL_NAME  = 1
@@ -423,6 +459,24 @@ class SVGExportDialog(QDialog):
     def _export(self):
         output = self.output_path.text().strip()
         layers_fields = self._checked_layers_fields()
+
+        width = self.width_spin.value()
+        threshold = width * 500  # e.g. 600 000 for the default 1200 px canvas
+        for layer, _ in layers_fields:
+            est = _estimate_layer_points(layer)
+            if est > threshold:
+                msg = (
+                    f"Layer \"{layer.name()}\" has an estimated "
+                    f"{est:,} polygon vertices — far more than needed for a "
+                    f"{width} px wide canvas.\n\n"
+                    f"Consider simplifying or generalizing the geometry (e.g. with "
+                    f"the Generalize Plugin) before exporting.\n\n"
+                    f"Export anyway?"
+                )
+                reply = QMessageBox.warning(self, "High Vertex Count", msg,
+                                            _MsgYes | _MsgNo, _MsgNo)
+                if reply != _MsgYes:
+                    return
 
         search_layer = None
         search_field = None
