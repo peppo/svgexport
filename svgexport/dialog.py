@@ -76,12 +76,22 @@ class SVGExportTask(QgsTask):
             )
             if self.create_html and not self.isCanceled():
                 from .html import generate_html_companion
-                # Use explicitly chosen search layer/field, fall back to top export layer
+                multi = len(self.layers_fields) > 1
+                layers_fields_prefixes = [
+                    (layer, field, f"{layer.name()}_" if multi else "")
+                    for layer, field in self.layers_fields
+                ]
+                # Determine search layer index (explicit choice or last layer)
                 search_layer = self.search_layer or self.layers_fields[-1][0]
-                search_field = self.search_field or self.layers_fields[-1][1]
-                id_prefix = f"{search_layer.name()}_" if len(self.layers_fields) > 1 else ""
+                search_layer_idx = next(
+                    (i for i, (l, _f, _p) in enumerate(layers_fields_prefixes) if l is search_layer),
+                    len(layers_fields_prefixes) - 1,
+                )
                 self.html_path = os.path.splitext(self.output_path)[0] + ".html"
-                generate_html_companion(self.output_path, self.html_path, search_layer, search_field, id_prefix)
+                generate_html_companion(
+                    self.output_path, self.html_path,
+                    layers_fields_prefixes, search_layer_idx,
+                )
         except Exception as e:
             self.error = str(e)
             QgsMessageLog.logMessage(

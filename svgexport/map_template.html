@@ -115,6 +115,31 @@
          background-color: DodgerBlue !important;
          color: #ffffff;
       }
+
+      /* Feature highlight — works for polygons (path), point groups (g > circle/rect/polygon),
+         and strokes for lines */
+      .feature-highlight > path,
+      .feature-highlight > polygon,
+      .feature-highlight > circle,
+      .feature-highlight > rect,
+      .feature-highlight.path-feature {
+         fill: #d4aa00 !important;
+      }
+      .feature-highlight > line,
+      .feature-highlight > polyline {
+         stroke: #d4aa00 !important;
+      }
+      /* polygon/path elements that are direct SVG children (no wrapping group) */
+      path.feature-highlight,
+      polygon.feature-highlight,
+      circle.feature-highlight,
+      rect.feature-highlight {
+         fill: #d4aa00 !important;
+      }
+      line.feature-highlight,
+      polyline.feature-highlight {
+         stroke: #d4aa00 !important;
+      }
    </style>
 
    <script>
@@ -207,29 +232,26 @@
       __SVG_CONTENT__
 
       <script type="text/javascript">
-         const ID_FIELD = "__ID_FIELD__";
-         const ID_PREFIX = "__ID_PREFIX__";
-         const data = __DATA_JSON__;
+         const layers = __LAYERS_JSON__;
+         const searchLayerIdx = __SEARCH_LAYER_IDX__;
 
-         let currentHighlight = null;
+         let currentHighlight = null;  // stores SVG element id string
 
-         function highlightFeature(idValue) {
+         function highlightFeature(elementId) {
             if (currentHighlight !== null) {
-               let old = document.getElementById(ID_PREFIX + String(currentHighlight));
-               if (old) old.style.fill = old.dataset.origFill || '';
+               let old = document.getElementById(currentHighlight);
+               if (old) old.classList.remove('feature-highlight');
             }
-            let el = document.getElementById(ID_PREFIX + String(idValue));
+            let el = document.getElementById(elementId);
             if (el) {
-               if (!el.dataset.origFill) {
-                  el.dataset.origFill = el.style.fill || el.getAttribute('fill') || '';
-               }
-               el.style.fill = '#d4aa00';
-               currentHighlight = idValue;
+               el.classList.add('feature-highlight');
+               currentHighlight = elementId;
             }
          }
 
-         function showInfo(idValue) {
-            let entity = data.find(n => String(n[ID_FIELD]) === String(idValue));
+         function showInfo(idValue, layerIdx) {
+            let lyr = layers[layerIdx];
+            let entity = lyr.data.find(function (n) { return String(n[lyr.idField]) === String(idValue); });
             if (!entity) return;
             let tbody = document.getElementById('featurefields');
             tbody.innerHTML = '';
@@ -244,26 +266,39 @@
          function search() {
             let val = document.getElementById('myInput').value.trim();
             if (!val) return;
-            let idx = data.findIndex(n => String(n[ID_FIELD]).toLowerCase().includes(val.toLowerCase()));
+            let sl = layers[searchLayerIdx];
+            let idx = sl.data.findIndex(function (n) {
+               return String(n[sl.idField]).toLowerCase().includes(val.toLowerCase());
+            });
             if (idx >= 0) {
-               let idValue = data[idx][ID_FIELD];
-               highlightFeature(idValue);
-               showInfo(idValue);
+               let idValue = sl.data[idx][sl.idField];
+               let elementId = sl.idPrefix + String(idValue);
+               highlightFeature(elementId);
+               showInfo(idValue, searchLayerIdx);
             }
          }
 
          window.addEventListener('load', function () {
+            // Sort layers by prefix length descending to match longest prefix first
+            let sortedLayers = layers.map(function (l, i) { return { layer: l, idx: i }; })
+               .sort(function (a, b) { return b.layer.idPrefix.length - a.layer.idPrefix.length; });
+
             document.querySelectorAll('svg [id]').forEach(function (el) {
                el.style.cursor = 'pointer';
                el.addEventListener('click', function (evt) {
                   evt.stopPropagation();
-                  let id = evt.currentTarget.id;
-                  if (ID_PREFIX && id.startsWith(ID_PREFIX)) id = id.slice(ID_PREFIX.length);
-                  highlightFeature(id);
-                  showInfo(id);
+                  let elId = evt.currentTarget.id;
+                  let match = sortedLayers.find(function (s) { return elId.startsWith(s.layer.idPrefix); });
+                  if (!match) return;
+                  let id = match.layer.idPrefix ? elId.slice(match.layer.idPrefix.length) : elId;
+                  highlightFeature(elId);
+                  showInfo(id, match.idx);
                });
             });
-            autocomplete(document.getElementById('myInput'), data.map(function (n) { return String(n[ID_FIELD]); }));
+
+            let sl = layers[searchLayerIdx];
+            autocomplete(document.getElementById('myInput'),
+               sl.data.map(function (n) { return String(n[sl.idField]); }));
          });
       </script>
    </div>
