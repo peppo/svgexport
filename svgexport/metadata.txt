@@ -15,7 +15,7 @@ repository=https://github.com/peppo/svgexport
 
 changelog=
     0.5.0 - Initial release
-    0.5.1 - Initial release
+    0.5.1 - added html export
 
 tags=svg,export,vector,html
 
