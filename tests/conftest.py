@@ -11,9 +11,9 @@ OUT_HTML = os.path.join(HERE, "test_output", "test_html_multilayer.html")
 
 # Locate QGIS Python — same candidate list as qgis_init.py
 _QGIS_CANDIDATES = [
+    r'C:\Program Files\QGIS 4.0.0',
     r'C:\Program Files\QGIS 3.40.15',
     r'C:\Program Files\QGIS 3.38',
-    r'C:\Program Files\QGIS 3.36',
 ]
 
 def _find_qgis_python():
@@ -21,8 +21,8 @@ def _find_qgis_python():
     candidates = [root] if root else _QGIS_CANDIDATES
     for base in candidates:
         for pattern in [
+            os.path.join(base, "apps", "Python313", "python.exe"),
             os.path.join(base, "apps", "Python312", "python.exe"),
-            os.path.join(base, "apps", "Python3",   "python.exe"),
         ]:
             if os.path.isfile(pattern):
                 return pattern
@@ -38,7 +38,7 @@ def html_file():
     """
     qgis_python = _find_qgis_python()
     if not qgis_python:
-        pytest.skip("QGIS Python not found — set QGIS_ROOT env var or install QGIS 3.40")
+        pytest.skip("QGIS Python not found — set QGIS_ROOT env var or install QGIS 4.0")
 
     script = os.path.join(HERE, "test_html.py")
     result = subprocess.run(

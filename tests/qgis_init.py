@@ -27,8 +27,8 @@ import sys
 # ---------------------------------------------------------------------------
 
 _CANDIDATES = [
-    r'C:\Program Files\QGIS 3.40.15',
     r'C:\Program Files\QGIS 4.0.0',
+    r'C:\Program Files\QGIS 3.40.15',
 ]
 
 
@@ -42,7 +42,7 @@ def _detect_qgis_root() -> str:
     raise RuntimeError(
         "QGIS installation not found. Set the QGIS_ROOT environment variable "
         "to the root of your QGIS installation (e.g. "
-        r"C:\Program Files\QGIS 3.40.15)."
+        r"C:\Program Files\QGIS 4.0.0)."
     )
 
 
