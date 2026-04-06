@@ -91,6 +91,7 @@ class SVGExportTask(QgsTask):
                 generate_html_companion(
                     self.output_path, self.html_path,
                     layers_fields_prefixes, search_layer_idx,
+                    search_field=self.search_field,
                 )
         except Exception as e:
             self.error = str(e)

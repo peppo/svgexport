@@ -34,6 +34,15 @@ def first_gemeinden_id(page):
     return el_id
 
 
+@pytest.fixture(scope="module")
+def first_name_value(page):
+    """Return the 'name' field value of the first gemeinden feature (search field)."""
+    return page.evaluate(
+        "() => { const sl = layers[searchLayerIdx]; "
+        "return sl.data.length > 0 ? String(sl.data[0][sl.searchField]) : null; }"
+    )
+
+
 def test_featureinfo_hidden_on_load(page):
     """#featureinfo panel must start hidden."""
     display = page.locator("#featureinfo").evaluate("el => el.style.display")
@@ -80,25 +89,50 @@ def test_click_line_shows_table(page):
     assert page.locator("#featurefields tr").count() > 0
 
 
-def test_search_highlights_feature(page, first_gemeinden_id):
-    """Typing an AGS value and pressing Enter highlights the polygon."""
-    # Extract the AGS code from the element id (strip 'gemeinden_' prefix)
-    ags = first_gemeinden_id.split("_", 1)[1]
-    page.locator("#myInput").fill(ags)
+def test_search_uses_search_field(page, first_gemeinden_id, first_name_value):
+    """Search uses searchField (name), not idField (ags)."""
+    assert first_name_value, "Could not read first name value from layers data"
+    page.locator("#myInput").fill(first_name_value)
     page.locator("#myInput").press("Enter")
     has_class = page.locator(f"[id='{first_gemeinden_id}']").first.evaluate(
         "el => el.classList.contains('feature-highlight')"
     )
-    assert has_class, "Searched element should have 'feature-highlight' class"
+    assert has_class, "Feature matching search field value should be highlighted"
 
 
-def test_search_shows_info(page, first_gemeinden_id):
-    """Search also populates the data table."""
-    ags = first_gemeinden_id.split("_", 1)[1]
-    page.locator("#myInput").fill(ags)
+def test_search_shows_info(page, first_name_value):
+    """Search populates the data table."""
+    page.locator("#myInput").fill(first_name_value)
     page.locator("#myInput").press("Enter")
     assert page.locator("#featureinfo").evaluate("el => el.style.display") == "block"
     assert page.locator("#featurefields tr").count() > 0
+
+
+def test_search_multi_highlight(page):
+    """Searching a value shared by multiple features highlights all of them."""
+    # The 'art' field has repeated values (e.g. 'Gemeinde') — use ueboname which
+    # groups multiple Gemeinden under one Verwaltungsgemeinschaft
+    match_count = page.evaluate("""() => {
+        const sl = layers[searchLayerIdx];
+        const val = 'Allershausen';
+        return sl.data.filter(n => String(n[sl.searchField]).toLowerCase().includes(val.toLowerCase())).length;
+    }""")
+
+    if match_count < 1:
+        pytest.skip("No features matching 'Allershausen' in name field")
+
+    page.locator("#myInput").fill("Allershausen")
+    page.locator("#myInput").press("Enter")
+
+    highlighted = page.evaluate(
+        "() => document.querySelectorAll('.feature-highlight').length"
+    )
+    assert highlighted >= 1, "At least one feature should be highlighted after search"
+
+    if match_count > 1:
+        assert highlighted == match_count, (
+            f"Expected {match_count} highlighted features, got {highlighted}"
+        )
 
 
 def test_previous_highlight_removed_on_new_click(page, first_gemeinden_id):
@@ -120,3 +154,28 @@ def test_previous_highlight_removed_on_new_click(page, first_gemeinden_id):
     assert page.locator(f"[id='{second_id}']").first.evaluate(
         "el => el.classList.contains('feature-highlight')"
     ), "New element should be highlighted"
+
+
+def test_search_clears_previous_highlights(page, first_gemeinden_id, first_name_value):
+    """Running a new search clears highlights from the previous one."""
+    # First: click-select one feature
+    page.locator(f"[id='{first_gemeinden_id}']").first.click()
+    assert page.locator(f"[id='{first_gemeinden_id}']").first.evaluate(
+        "el => el.classList.contains('feature-highlight')"
+    ), "Pre-condition: first element should be highlighted"
+
+    # Then: search for a different name — previous highlight must vanish
+    second_name = page.evaluate("""() => {
+        const sl = layers[searchLayerIdx];
+        return sl.data.length > 1 ? String(sl.data[1][sl.searchField]) : null;
+    }""")
+    if not second_name or second_name == first_name_value:
+        pytest.skip("Cannot find a distinct second name value")
+
+    page.locator("#myInput").fill(second_name)
+    page.locator("#myInput").press("Enter")
+
+    still_highlighted = page.locator(f"[id='{first_gemeinden_id}']").first.evaluate(
+        "el => el.classList.contains('feature-highlight')"
+    )
+    assert not still_highlighted, "Previous click-highlight should be cleared by new search"

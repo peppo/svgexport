@@ -235,26 +235,48 @@
          const layers = __LAYERS_JSON__;
          const searchLayerIdx = __SEARCH_LAYER_IDX__;
 
-         let currentHighlight = null;  // stores SVG element id string
+         let currentHighlights = [];  // array of SVG element id strings
 
-         function highlightFeature(elementId) {
-            if (currentHighlight !== null) {
-               let old = document.getElementById(currentHighlight);
-               if (old) old.classList.remove('feature-highlight');
-            }
+         function clearHighlights() {
+            currentHighlights.forEach(function (id) {
+               let el = document.getElementById(id);
+               if (el) el.classList.remove('feature-highlight');
+            });
+            currentHighlights = [];
+         }
+
+         function highlightFeature(elementId) {  // single-select (click)
+            clearHighlights();
             let el = document.getElementById(elementId);
             if (el) {
                el.classList.add('feature-highlight');
-               currentHighlight = elementId;
+               currentHighlights = [elementId];
             }
          }
 
-         function showInfo(idValue, layerIdx) {
+         function highlightFeatures(elementIds) {  // multi-highlight (search)
+            clearHighlights();
+            elementIds.forEach(function (id) {
+               let el = document.getElementById(id);
+               if (el) {
+                  el.classList.add('feature-highlight');
+                  currentHighlights.push(id);
+               }
+            });
+         }
+
+         function showInfo(idValue, layerIdx, total) {
             let lyr = layers[layerIdx];
             let entity = lyr.data.find(function (n) { return String(n[lyr.idField]) === String(idValue); });
             if (!entity) return;
             let tbody = document.getElementById('featurefields');
             tbody.innerHTML = '';
+            if (total > 1) {
+               let tr = document.createElement('tr');
+               tr.innerHTML = '<td colspan="2" style="color:#888;font-style:italic">'
+                            + total + ' features selected</td>';
+               tbody.appendChild(tr);
+            }
             for (let [k, v] of Object.entries(entity)) {
                let tr = document.createElement('tr');
                tr.innerHTML = '<td><b>' + k + '</b></td><td>' + (v !== null ? v : '') + '</td>';
@@ -267,15 +289,13 @@
             let val = document.getElementById('myInput').value.trim();
             if (!val) return;
             let sl = layers[searchLayerIdx];
-            let idx = sl.data.findIndex(function (n) {
-               return String(n[sl.idField]).toLowerCase().includes(val.toLowerCase());
+            let matches = sl.data.filter(function (n) {
+               return String(n[sl.searchField]).toLowerCase().includes(val.toLowerCase());
             });
-            if (idx >= 0) {
-               let idValue = sl.data[idx][sl.idField];
-               let elementId = sl.idPrefix + String(idValue);
-               highlightFeature(elementId);
-               showInfo(idValue, searchLayerIdx);
-            }
+            if (matches.length === 0) return;
+            let elementIds = matches.map(function (n) { return sl.idPrefix + String(n[sl.idField]); });
+            highlightFeatures(elementIds);
+            showInfo(matches[0][sl.idField], searchLayerIdx, matches.length);
          }
 
          window.addEventListener('load', function () {
@@ -292,13 +312,13 @@
                   if (!match) return;
                   let id = match.layer.idPrefix ? elId.slice(match.layer.idPrefix.length) : elId;
                   highlightFeature(elId);
-                  showInfo(id, match.idx);
+                  showInfo(id, match.idx, 1);
                });
             });
 
             let sl = layers[searchLayerIdx];
-            autocomplete(document.getElementById('myInput'),
-               sl.data.map(function (n) { return String(n[sl.idField]); }));
+            let searchValues = [...new Set(sl.data.map(function (n) { return String(n[sl.searchField]); }))];
+            autocomplete(document.getElementById('myInput'), searchValues);
          });
       </script>
    </div>

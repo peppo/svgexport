@@ -29,6 +29,8 @@ def test_gemeinden_layer_data(html_file):
     lyr = next((l for l in layers if l["idPrefix"] == "gemeinden_"), None)
     assert lyr is not None, "No layer with idPrefix 'gemeinden_'"
     assert lyr["idField"] == "ags"
+    assert "searchField" in lyr, "gemeinden layer missing 'searchField' key"
+    assert lyr["searchField"] == "name", f"Expected searchField='name', got '{lyr['searchField']}'"
     ags_values = [str(r["ags"]) for r in lyr["data"]]
     assert len(ags_values) > 0, "gemeinden data is empty"
     assert any(v for v in ags_values), "ags field has no values"
@@ -41,6 +43,7 @@ def test_point_layer_data(html_file):
     lyr = next((l for l in layers if l["idPrefix"] == "point_"), None)
     assert lyr is not None, "No layer with idPrefix 'point_'"
     assert lyr["idField"] == "id"
+    assert "searchField" in lyr, "point layer missing 'searchField' key"
     assert len(lyr["data"]) > 0
 
 
@@ -51,6 +54,7 @@ def test_line_layer_data(html_file):
     lyr = next((l for l in layers if l["idPrefix"] == "line_"), None)
     assert lyr is not None, "No layer with idPrefix 'line_'"
     assert lyr["idField"] == "id"
+    assert "searchField" in lyr, "line layer missing 'searchField' key"
     assert len(lyr["data"]) > 0
 
 

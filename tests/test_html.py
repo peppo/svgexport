@@ -46,7 +46,8 @@ print(f"SVG exported: {OUT_SVG}")
 
 # --- Generate HTML companion ---
 layers_fields_prefixes = [(layer, field, f"{layer.name()}_") for layer, field in layers_fields]
-generate_html_companion(OUT_SVG, OUT_HTML, layers_fields_prefixes, search_layer_idx=0)
+generate_html_companion(OUT_SVG, OUT_HTML, layers_fields_prefixes, search_layer_idx=0,
+                        search_field="name")
 assert os.path.exists(OUT_HTML), "HTML was not created"
 print(f"HTML generated: {OUT_HTML}")
 
