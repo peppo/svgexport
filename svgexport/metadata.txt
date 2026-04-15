@@ -16,6 +16,7 @@ repository=https://github.com/peppo/svgexport
 changelog=
     0.5.0 - Initial release
     0.5.1 - added html export
+    0.5.2 - responsive two-column HTML layout; only bottommost polygon layer selectable in JS app; fix serialization of date/time fields
 
 tags=svg,export,vector,html
 
