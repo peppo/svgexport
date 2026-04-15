@@ -29,6 +29,7 @@ class SVGExportPlugin:
         if self.dialog is None:
             from .dialog import SVGExportDialog
             self.dialog = SVGExportDialog(self.iface)
+            self.dialog.finished.connect(lambda _: setattr(self, 'dialog', None))
 
         self.dialog.show()
         self.dialog.raise_()
