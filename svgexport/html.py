@@ -1,6 +1,22 @@
 import json
 import os
 
+from qgis.PyQt.QtCore import QDate, QDateTime, QTime
+from qgis.core import NULL
+
+
+def _coerce(v):
+    """Convert QGIS/Qt field values to JSON-serializable Python types."""
+    if v is NULL or v is None:
+        return None
+    if isinstance(v, QDateTime):
+        return v.toString("yyyy-MM-ddTHH:mm:ss")
+    if isinstance(v, QDate):
+        return v.toString("yyyy-MM-dd")
+    if isinstance(v, QTime):
+        return v.toString("HH:mm:ss")
+    return v
+
 
 def generate_html_companion(svg_path, html_path, layers_fields_prefixes,
                             search_layer_idx=-1, search_field=None):
@@ -23,14 +39,14 @@ def generate_html_companion(svg_path, html_path, layers_fields_prefixes,
 
     # Build layers JSON — one entry per layer with its data
     layers = []
-    for i, (layer, id_field, id_prefix) in enumerate(layers_fields_prefixes):
+    for i, (layer, id_field, id_prefix, selectable) in enumerate(layers_fields_prefixes):
         records = []
         for feature in layer.getFeatures():
-            row = {field.name(): feature[field.name()] for field in layer.fields()}
+            row = {field.name(): _coerce(feature[field.name()]) for field in layer.fields()}
             records.append(row)
         sf = (search_field or id_field) if i == actual_search_idx else id_field
         layers.append({"idField": id_field, "idPrefix": id_prefix,
-                        "searchField": sf, "data": records})
+                        "searchField": sf, "selectable": selectable, "data": records})
 
     layers_json = json.dumps(layers, ensure_ascii=False)
 

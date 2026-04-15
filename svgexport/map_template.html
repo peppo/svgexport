@@ -304,12 +304,12 @@
                .sort(function (a, b) { return b.layer.idPrefix.length - a.layer.idPrefix.length; });
 
             document.querySelectorAll('svg [id]').forEach(function (el) {
+               let match = sortedLayers.find(function (s) { return el.id.startsWith(s.layer.idPrefix); });
+               if (!match || !match.layer.selectable) return;
                el.style.cursor = 'pointer';
                el.addEventListener('click', function (evt) {
                   evt.stopPropagation();
                   let elId = evt.currentTarget.id;
-                  let match = sortedLayers.find(function (s) { return elId.startsWith(s.layer.idPrefix); });
-                  if (!match) return;
                   let id = match.layer.idPrefix ? elId.slice(match.layer.idPrefix.length) : elId;
                   highlightFeature(elId);
                   showInfo(id, match.idx, 1);

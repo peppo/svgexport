@@ -112,15 +112,31 @@ class SVGExportTask(QgsTask):
             )
             if self.create_html and not self.isCanceled():
                 from .html import generate_html_companion
+                from qgis.core import QgsWkbTypes
+
+                def _is_polygon(layer):
+                    return QgsWkbTypes.geometryType(layer.wkbType()) == QgsWkbTypes.PolygonGeometry
+
+                # Only one polygon layer is selectable: the search layer if it's a polygon,
+                # otherwise the bottommost polygon (first in layers_fields, bottom-to-top order).
+                if self.search_layer and _is_polygon(self.search_layer):
+                    selectable_polygon = self.search_layer
+                else:
+                    selectable_polygon = next(
+                        (l for l, _ in self.layers_fields if _is_polygon(l)), None
+                    )
+
                 multi = len(self.layers_fields) > 1
-                layers_fields_prefixes = [
-                    (layer, field, f"{layer.name()}_" if multi else "")
-                    for layer, field in self.layers_fields
-                ]
+                layers_fields_prefixes = []
+                for layer, field in self.layers_fields:
+                    prefix = f"{layer.name()}_" if multi else ""
+                    selectable = (not _is_polygon(layer)) or (layer is selectable_polygon)
+                    layers_fields_prefixes.append((layer, field, prefix, selectable))
+
                 # Determine search layer index (explicit choice or last layer)
                 search_layer = self.search_layer or self.layers_fields[-1][0]
                 search_layer_idx = next(
-                    (i for i, (l, _f, _p) in enumerate(layers_fields_prefixes) if l is search_layer),
+                    (i for i, (l, _f, _p, _s) in enumerate(layers_fields_prefixes) if l is search_layer),
                     len(layers_fields_prefixes) - 1,
                 )
                 self.html_path = os.path.splitext(self.output_path)[0] + ".html"
