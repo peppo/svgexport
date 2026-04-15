@@ -2,34 +2,64 @@
 <html lang="en">
 <head>
    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
    <title>SVG Map</title>
    <style>
+      html { height: 100%; }
+
       body {
          margin: 0;
-         padding: 1em;
          font-family: Arial, Verdana, Helvetica, sans-serif;
+         background: #f0f0f0;
       }
 
-      .svg__karte {
-         background: white;
-         margin: auto;
+      /* ── Two-column layout ── */
+      .app {
+         max-width: 1400px;
+         margin: 0 auto;
+         display: grid;
+         grid-template-columns: 1fr 2fr;
+         min-height: 100dvh;
       }
 
-      .svg__karte svg path:hover,
-      .svg__karte svg polygon:hover,
-      .svg__karte svg circle:hover,
-      .svg__karte svg rect:hover {
-         opacity: 0.8;
-         cursor: pointer;
-      }
-
-      .toolbar {
+      .sidebar {
+         padding: 1em;
          display: flex;
-         align-items: flex-start;
+         flex-direction: column;
          gap: 1em;
-         padding-bottom: 0.5em;
+         overflow-y: auto;
+         background: #fff;
+         border-right: 1px solid #ddd;
       }
 
+      .map-col {
+         position: sticky;
+         top: 0;
+         height: 100dvh;
+         overflow: hidden;
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         background: #fff;
+      }
+
+      .map-col svg {
+         width: 100%;
+         height: 100%;
+         max-width: 100%;
+         max-height: 100%;
+         display: block;
+      }
+
+      /* ── Hover feedback for selectable features ── */
+      .map-col svg path:hover,
+      .map-col svg polygon:hover,
+      .map-col svg circle:hover,
+      .map-col svg rect:hover {
+         opacity: 0.8;
+      }
+
+      /* ── Search form ── */
       form.searchform {
          display: flex;
          border: 1px solid #ccc;
@@ -43,7 +73,7 @@
          font-size: 14px;
          color: inherit;
          outline: none;
-         min-width: 200px;
+         width: 100%;
       }
 
       form.searchform input[type="search"]::placeholder {
@@ -53,6 +83,7 @@
       form.searchform button[type="submit"] {
          text-indent: -999px;
          overflow: hidden;
+         flex-shrink: 0;
          width: 40px;
          border: none;
          background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'%3E%3C/path%3E%3C/svg%3E") no-repeat center;
@@ -64,6 +95,7 @@
          opacity: 1;
       }
 
+      /* ── Feature info box ── */
       #featureinfo {
          display: none;
          background: white;
@@ -71,11 +103,11 @@
          border-radius: 5px;
          padding: 8px 12px;
          font-size: 10pt;
-         max-width: 400px;
       }
 
       #featureinfo table {
          border-collapse: collapse;
+         width: 100%;
       }
 
       #featureinfo td {
@@ -83,10 +115,10 @@
          vertical-align: top;
       }
 
-      /* Autocomplete */
+      /* ── Autocomplete ── */
       .autocomplete {
          position: relative;
-         display: inline-block;
+         flex: 1;
       }
 
       .autocomplete-items {
@@ -116,8 +148,7 @@
          color: #ffffff;
       }
 
-      /* Feature highlight — works for polygons (path), point groups (g > circle/rect/polygon),
-         and strokes for lines */
+      /* ── Feature highlight — polygons, points, lines ── */
       .feature-highlight > path,
       .feature-highlight > polygon,
       .feature-highlight > circle,
@@ -129,7 +160,6 @@
       .feature-highlight > polyline {
          stroke: #d4aa00 !important;
       }
-      /* polygon/path elements that are direct SVG children (no wrapping group) */
       path.feature-highlight,
       polygon.feature-highlight,
       circle.feature-highlight,
@@ -139,6 +169,23 @@
       line.feature-highlight,
       polyline.feature-highlight {
          stroke: #d4aa00 !important;
+      }
+
+      /* ── Mobile: single column ── */
+      @media (max-width: 700px) {
+         .app {
+            grid-template-columns: 1fr;
+            min-height: auto;
+         }
+         .sidebar {
+            border-right: none;
+            border-bottom: 1px solid #ddd;
+         }
+         .map-col {
+            position: static;
+            height: auto;
+            min-height: 60vw;
+         }
       }
    </style>
 
@@ -216,8 +263,8 @@
 </head>
 
 <body>
-   <div class="svg__karte">
-      <div class="toolbar">
+   <div class="app">
+      <aside class="sidebar">
          <form class="searchform" autocomplete="off" onsubmit="search(); return false;">
             <div class="autocomplete">
                <input type="search" id="myInput" placeholder="Search..." />
@@ -227,100 +274,102 @@
          <div id="featureinfo">
             <table><tbody id="featurefields"></tbody></table>
          </div>
+      </aside>
+
+      <div class="map-col">
+         __SVG_CONTENT__
       </div>
+   </div>
 
-      __SVG_CONTENT__
+   <script type="text/javascript">
+      const layers = __LAYERS_JSON__;
+      const searchLayerIdx = __SEARCH_LAYER_IDX__;
 
-      <script type="text/javascript">
-         const layers = __LAYERS_JSON__;
-         const searchLayerIdx = __SEARCH_LAYER_IDX__;
+      let currentHighlights = [];  // array of SVG element id strings
 
-         let currentHighlights = [];  // array of SVG element id strings
+      function clearHighlights() {
+         currentHighlights.forEach(function (id) {
+            let el = document.getElementById(id);
+            if (el) el.classList.remove('feature-highlight');
+         });
+         currentHighlights = [];
+      }
 
-         function clearHighlights() {
-            currentHighlights.forEach(function (id) {
-               let el = document.getElementById(id);
-               if (el) el.classList.remove('feature-highlight');
-            });
-            currentHighlights = [];
+      function highlightFeature(elementId) {  // single-select (click)
+         clearHighlights();
+         let el = document.getElementById(elementId);
+         if (el) {
+            el.classList.add('feature-highlight');
+            currentHighlights = [elementId];
          }
+      }
 
-         function highlightFeature(elementId) {  // single-select (click)
-            clearHighlights();
-            let el = document.getElementById(elementId);
+      function highlightFeatures(elementIds) {  // multi-highlight (search)
+         clearHighlights();
+         elementIds.forEach(function (id) {
+            let el = document.getElementById(id);
             if (el) {
                el.classList.add('feature-highlight');
-               currentHighlights = [elementId];
+               currentHighlights.push(id);
             }
-         }
-
-         function highlightFeatures(elementIds) {  // multi-highlight (search)
-            clearHighlights();
-            elementIds.forEach(function (id) {
-               let el = document.getElementById(id);
-               if (el) {
-                  el.classList.add('feature-highlight');
-                  currentHighlights.push(id);
-               }
-            });
-         }
-
-         function showInfo(idValue, layerIdx, total) {
-            let lyr = layers[layerIdx];
-            let entity = lyr.data.find(function (n) { return String(n[lyr.idField]) === String(idValue); });
-            if (!entity) return;
-            let tbody = document.getElementById('featurefields');
-            tbody.innerHTML = '';
-            if (total > 1) {
-               let tr = document.createElement('tr');
-               tr.innerHTML = '<td colspan="2" style="color:#888;font-style:italic">'
-                            + total + ' features selected</td>';
-               tbody.appendChild(tr);
-            }
-            for (let [k, v] of Object.entries(entity)) {
-               let tr = document.createElement('tr');
-               tr.innerHTML = '<td><b>' + k + '</b></td><td>' + (v !== null ? v : '') + '</td>';
-               tbody.appendChild(tr);
-            }
-            document.getElementById('featureinfo').style.display = 'block';
-         }
-
-         function search() {
-            let val = document.getElementById('myInput').value.trim();
-            if (!val) return;
-            let sl = layers[searchLayerIdx];
-            let matches = sl.data.filter(function (n) {
-               return String(n[sl.searchField]).toLowerCase().includes(val.toLowerCase());
-            });
-            if (matches.length === 0) return;
-            let elementIds = matches.map(function (n) { return sl.idPrefix + String(n[sl.idField]); });
-            highlightFeatures(elementIds);
-            showInfo(matches[0][sl.idField], searchLayerIdx, matches.length);
-         }
-
-         window.addEventListener('load', function () {
-            // Sort layers by prefix length descending to match longest prefix first
-            let sortedLayers = layers.map(function (l, i) { return { layer: l, idx: i }; })
-               .sort(function (a, b) { return b.layer.idPrefix.length - a.layer.idPrefix.length; });
-
-            document.querySelectorAll('svg [id]').forEach(function (el) {
-               let match = sortedLayers.find(function (s) { return el.id.startsWith(s.layer.idPrefix); });
-               if (!match || !match.layer.selectable) return;
-               el.style.cursor = 'pointer';
-               el.addEventListener('click', function (evt) {
-                  evt.stopPropagation();
-                  let elId = evt.currentTarget.id;
-                  let id = match.layer.idPrefix ? elId.slice(match.layer.idPrefix.length) : elId;
-                  highlightFeature(elId);
-                  showInfo(id, match.idx, 1);
-               });
-            });
-
-            let sl = layers[searchLayerIdx];
-            let searchValues = [...new Set(sl.data.map(function (n) { return String(n[sl.searchField]); }))];
-            autocomplete(document.getElementById('myInput'), searchValues);
          });
-      </script>
-   </div>
+      }
+
+      function showInfo(idValue, layerIdx, total) {
+         let lyr = layers[layerIdx];
+         let entity = lyr.data.find(function (n) { return String(n[lyr.idField]) === String(idValue); });
+         if (!entity) return;
+         let tbody = document.getElementById('featurefields');
+         tbody.innerHTML = '';
+         if (total > 1) {
+            let tr = document.createElement('tr');
+            tr.innerHTML = '<td colspan="2" style="color:#888;font-style:italic">'
+                         + total + ' features selected</td>';
+            tbody.appendChild(tr);
+         }
+         for (let [k, v] of Object.entries(entity)) {
+            let tr = document.createElement('tr');
+            tr.innerHTML = '<td><b>' + k + '</b></td><td>' + (v !== null ? v : '') + '</td>';
+            tbody.appendChild(tr);
+         }
+         document.getElementById('featureinfo').style.display = 'block';
+      }
+
+      function search() {
+         let val = document.getElementById('myInput').value.trim();
+         if (!val) return;
+         let sl = layers[searchLayerIdx];
+         let matches = sl.data.filter(function (n) {
+            return String(n[sl.searchField]).toLowerCase().includes(val.toLowerCase());
+         });
+         if (matches.length === 0) return;
+         let elementIds = matches.map(function (n) { return sl.idPrefix + String(n[sl.idField]); });
+         highlightFeatures(elementIds);
+         showInfo(matches[0][sl.idField], searchLayerIdx, matches.length);
+      }
+
+      window.addEventListener('load', function () {
+         // Sort layers by prefix length descending to match longest prefix first
+         let sortedLayers = layers.map(function (l, i) { return { layer: l, idx: i }; })
+            .sort(function (a, b) { return b.layer.idPrefix.length - a.layer.idPrefix.length; });
+
+         document.querySelectorAll('svg [id]').forEach(function (el) {
+            let match = sortedLayers.find(function (s) { return el.id.startsWith(s.layer.idPrefix); });
+            if (!match || !match.layer.selectable) return;
+            el.style.cursor = 'pointer';
+            el.addEventListener('click', function (evt) {
+               evt.stopPropagation();
+               let elId = evt.currentTarget.id;
+               let id = match.layer.idPrefix ? elId.slice(match.layer.idPrefix.length) : elId;
+               highlightFeature(elId);
+               showInfo(id, match.idx, 1);
+            });
+         });
+
+         let sl = layers[searchLayerIdx];
+         let searchValues = [...new Set(sl.data.map(function (n) { return String(n[sl.searchField]); }))];
+         autocomplete(document.getElementById('myInput'), searchValues);
+      });
+   </script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from qgis.PyQt.QtCore import QDate, QDateTime, QTime
 from qgis.core import NULL
@@ -55,6 +56,10 @@ def generate_html_companion(svg_path, html_path, layers_fields_prefixes,
     # Strip the XML declaration (<?xml ...?>) — not valid inside HTML
     if svg_content.startswith("<?xml"):
         svg_content = svg_content[svg_content.index("?>") + 2:].lstrip()
+    # Remove explicit width/height from the <svg> tag so CSS controls sizing;
+    # viewBox is preserved for correct aspect-ratio scaling.
+    svg_content = re.sub(r'(<svg\b[^>]*?)\s+width="[^"]*"', r'\1', svg_content)
+    svg_content = re.sub(r'(<svg\b[^>]*?)\s+height="[^"]*"', r'\1', svg_content)
 
     html = (template
             .replace("__LAYERS_JSON__", layers_json)
